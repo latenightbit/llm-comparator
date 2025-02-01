@@ -1,4 +1,3 @@
-//app.jsx
 import React, { useState, useEffect } from 'react';
 import { Bar } from 'react-chartjs-2';
 import { Chart, registerables } from 'chart.js';
@@ -10,27 +9,22 @@ export default function App() {
   const [tokens, setTokens] = useState({ input: 1000, output: 500 });
   const [selectedProviders, setSelectedProviders] = useState([]);
 
-  // Default providers
-  const [defaultProviders] = useState([
-    {
-      name: 'OpenAI',
-      model: 'GPT-4',
-      inputCost: 30.0,
-      outputCost: 60.0
-    },
-    {
-      name: 'OpenAI',
-      model: 'GPT-3.5-Turbo',
-      inputCost: 1.5,
-      outputCost: 2.0
-    },
-    {
-      name: 'Anthropic',
-      model: 'Claude 2',
-      inputCost: 11.02,
-      outputCost: 32.68
+  // Fetch default providers from your backend (/pricing)
+  const [defaultProviders, setDefaultProviders] = useState([]);
+  
+  useEffect(() => {
+    async function fetchPricing() {
+      try {
+        const response = await fetch('http://localhost:8000/pricing');
+        const data = await response.json();
+        console.log("Fetched default providers:", data);
+        setDefaultProviders(data);
+      } catch (error) {
+        console.error('Error fetching pricing:', error);
+      }
     }
-  ]);
+    fetchPricing();
+  }, []);
 
   // Custom providers (persisted to localStorage)
   const [customProviders, setCustomProviders] = useState(() => {
@@ -44,7 +38,7 @@ export default function App() {
     outputCost: 0
   });
   const [editingIndex, setEditingIndex] = useState(null);
-
+  
   // Persist customProviders in localStorage
   useEffect(() => {
     localStorage.setItem('customProviders', JSON.stringify(customProviders));
@@ -61,13 +55,11 @@ export default function App() {
   };
 
   const deleteProvider = (index) => {
-    setCustomProviders((prevProviders) =>
-      prevProviders.filter((_, i) => i !== index)
-    );
-    setSelectedProviders((prev) =>
+    setCustomProviders(prevProviders => prevProviders.filter((_, i) => i !== index));
+    setSelectedProviders(prev =>
       prev
-        .filter((i) => i !== index)
-        .map((i) => (i > index ? i - 1 : i))
+        .filter(i => i !== index)
+        .map(i => i > index ? i - 1 : i)
     );
   };
 
@@ -97,9 +89,9 @@ export default function App() {
   };
 
   const toggleProvider = (index) => {
-    setSelectedProviders((prev) =>
-      prev.includes(index)
-        ? prev.filter((i) => i !== index)
+    setSelectedProviders(prev => 
+      prev.includes(index) 
+        ? prev.filter(i => i !== index)
         : [...prev, index]
     );
   };
@@ -120,21 +112,30 @@ export default function App() {
       setResults([]);
       return;
     }
+    // Combine default (dynamic) providers with custom ones.
     const allProviders = [...defaultProviders, ...customProviders];
-    const selectedProvidersData = allProviders.filter((_, index) =>
+    console.log("All providers:", allProviders);
+    const selectedProvidersData = allProviders.filter((_, index) => 
       selectedProviders.includes(index)
     );
+    console.log("Selected providers data:", selectedProvidersData);
 
-    const response = await fetch('http://localhost:8000/calculate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        input_tokens: tokens.input,
-        output_tokens: tokens.output,
-        custom_providers: selectedProvidersData
-      })
-    });
-    setResults(await response.json());
+    try {
+      const response = await fetch('http://localhost:8000/calculate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          input_tokens: tokens.input,
+          output_tokens: tokens.output,
+          custom_providers: selectedProvidersData
+        })
+      });
+      const data = await response.json();
+      console.log("Calculation response:", data);
+      setResults(data);
+    } catch (error) {
+      console.error("Error during calculation:", error);
+    }
   };
 
   // Select all providers (both default and custom)
@@ -146,7 +147,7 @@ export default function App() {
   // Token input change handler to trigger recalculation
   const handleTokenChange = (type, value) => {
     const newValue = parseInt(value.replace(/,/g, '')) || 0;
-    setTokens((prev) => ({
+    setTokens(prev => ({
       ...prev,
       [type]: newValue
     }));
@@ -210,7 +211,7 @@ export default function App() {
             <input
               type="text"
               value={tokens.input.toLocaleString()}
-              onChange={(e) =>
+              onChange={e =>
                 setTokens({
                   ...tokens,
                   input: parseInt(e.target.value.replace(/,/g, '')) || 0
@@ -238,7 +239,7 @@ export default function App() {
             <input
               type="text"
               value={tokens.output.toLocaleString()}
-              onChange={(e) =>
+              onChange={e =>
                 setTokens({
                   ...tokens,
                   output: parseInt(e.target.value.replace(/,/g, '')) || 0
@@ -287,12 +288,7 @@ export default function App() {
             '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
         }}
       >
-        <div
-          style={{
-            maxWidth: '1100px',
-            margin: '0 auto'
-          }}
-        >
+        <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
           <h3
             style={{
               fontSize: '1.35rem',
@@ -314,7 +310,7 @@ export default function App() {
             <input
               type="text"
               value={newProvider.name}
-              onChange={(e) =>
+              onChange={e =>
                 setNewProvider({ ...newProvider, name: e.target.value })
               }
               placeholder="Provider Name"
@@ -329,7 +325,7 @@ export default function App() {
             <input
               type="text"
               value={newProvider.model}
-              onChange={(e) =>
+              onChange={e =>
                 setNewProvider({ ...newProvider, model: e.target.value })
               }
               placeholder="Model Name"
@@ -344,7 +340,7 @@ export default function App() {
             <input
               type="number"
               value={newProvider.inputCost}
-              onChange={(e) =>
+              onChange={e =>
                 setNewProvider({
                   ...newProvider,
                   inputCost: Math.max(
@@ -367,7 +363,7 @@ export default function App() {
             <input
               type="number"
               value={newProvider.outputCost}
-              onChange={(e) =>
+              onChange={e =>
                 setNewProvider({
                   ...newProvider,
                   outputCost: Math.max(
@@ -432,8 +428,8 @@ export default function App() {
         </div>
       </div>
 
-      {/* Custom providers list */}
-      {customProviders.length > 0 && (
+      {/* Providers list */}
+      {(defaultProviders.length > 0 || customProviders.length > 0) && (
         <div
           style={{
             margin: '1.8rem 0',
@@ -523,13 +519,7 @@ export default function App() {
                     <strong style={{ fontSize: '1rem', color: '#2d3748' }}>
                       {provider.name} - {provider.model}
                     </strong>
-                    <div
-                      style={{
-                        marginTop: '4px',
-                        color: '#4a5568',
-                        fontSize: '0.85rem'
-                      }}
-                    >
+                    <div style={{ marginTop: '4px', color: '#4a5568', fontSize: '0.85rem' }}>
                       Input Cost: ${provider.inputCost} / Output Cost: ${provider.outputCost}
                     </div>
                   </div>
@@ -587,47 +577,30 @@ export default function App() {
           <div style={{ height: '400px', marginBottom: '2rem' }}>
             <Bar
               data={{
-                labels: results.map((r) => `${r.provider} - ${r.model}`),
-                datasets: [
-                  {
-                    label: 'Total Cost ($)',
-                    data: results.map((r) => r.total_cost),
-                    backgroundColor: [
-                      '#3182ce',
-                      '#38a169',
-                      '#805ad5',
-                      '#d53f8c',
-                      '#d69e2e',
-                      '#319795',
-                      '#744210',
-                      '#2c5282',
-                      '#285e61',
-                      '#702459'
-                    ].slice(0, results.length)
-                  }
-                ]
+                labels: results.map(r => `${r.provider} - ${r.model}`),
+                datasets: [{
+                  label: 'Total Cost ($)',
+                  data: results.map(r => r.total_cost),
+                  backgroundColor: [
+                    '#3182ce', '#38a169', '#805ad5', '#d53f8c', '#d69e2e',
+                    '#319795', '#744210', '#2c5282', '#285e61', '#702459'
+                  ].slice(0, results.length)
+                }]
               }}
               options={{
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                  legend: {
-                    display: false
-                  },
+                  legend: { display: false },
                   tooltip: {
                     backgroundColor: 'rgba(0, 0, 0, 0.8)',
                     padding: 12,
-                    titleFont: {
-                      size: 14,
-                      weight: 'bold'
-                    },
-                    bodyFont: {
-                      size: 13
-                    },
+                    titleFont: { size: 14, weight: 'bold' },
+                    bodyFont: { size: 13 },
                     callbacks: {
                       label: (context) => {
                         const value = context.raw;
-                        const minCost = Math.min(...results.map((r) => r.total_cost));
+                        const minCost = Math.min(...results.map(r => r.total_cost));
                         const timesMoreExpensive = (value / minCost).toFixed(2);
                         return value === minCost
                           ? `$${value.toFixed(5)} (Cheapest)`
@@ -640,51 +613,13 @@ export default function App() {
             />
           </div>
 
-          <table
-            style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontSize: '0.875rem'
-            }}
-          >
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
             <thead>
               <tr style={{ backgroundColor: '#f7fafc' }}>
-                <th
-                  style={{
-                    padding: '16px',
-                    textAlign: 'left',
-                    borderBottom: '2px solid #e2e8f0'
-                  }}
-                >
-                  Provider
-                </th>
-                <th
-                  style={{
-                    padding: '16px',
-                    textAlign: 'left',
-                    borderBottom: '2px solid #e2e8f0'
-                  }}
-                >
-                  Cost
-                </th>
-                <th
-                  style={{
-                    padding: '16px',
-                    textAlign: 'left',
-                    borderBottom: '2px solid #e2e8f0'
-                  }}
-                >
-                  Input
-                </th>
-                <th
-                  style={{
-                    padding: '16px',
-                    textAlign: 'left',
-                    borderBottom: '2px solid #e2e8f0'
-                  }}
-                >
-                  Output
-                </th>
+                <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Provider</th>
+                <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Cost</th>
+                <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Input</th>
+                <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Output</th>
               </tr>
             </thead>
             <tbody>

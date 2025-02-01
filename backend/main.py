@@ -1,6 +1,6 @@
-# main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import httpx
 
 app = FastAPI()
 
@@ -13,20 +13,52 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Endpoint to fetch pricing data from OpenRouter dynamically
+@app.get("/pricing")
+async def get_pricing():
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get("https://openrouter.ai/api/v1/models")
+            data = response.json()
+    except Exception as e:
+        print("Error fetching OpenRouter pricing:", e)
+        return []
+
+    providers = []
+    for model in data.get("data", []):
+        try:
+            prompt_cost = float(model.get("pricing", {}).get("prompt", "0"))
+            completion_cost = float(model.get("pricing", {}).get("completion", "0"))
+        except ValueError:
+            prompt_cost = 0
+            completion_cost = 0
+
+        providers.append({
+            "name": model.get("name", "Unknown"),
+            "model": model.get("id", "Unknown"),
+            # Multiply by 1,000,000 because our calculator expects cost per 1M tokens
+            "inputCost": prompt_cost * 1_000_000,
+            "outputCost": completion_cost * 1_000_000
+        })
+    return providers
+
+# Calculation endpoint that uses the providers passed from the front end.
 @app.post("/calculate")
 async def calculate_cost(request: dict):
-    # Safely get token values (default to 0 if not provided)
+    # Log the received request for debugging.
+    print("Received calculation request:", request)
+    
     input_tokens = max(0, int(request.get("input_tokens", 0)))
     output_tokens = max(0, int(request.get("output_tokens", 0)))
-    # Get the list of selected providers (which may include default ones from the frontend)
+    # Expecting the front end to pass a list of providers under "custom_providers"
     providers = request.get("custom_providers", [])
     
+    # Log the providers received
+    print("Providers for calculation:", providers)
+    
     results = []
-    # Loop through only the providers that were sent by the front end
     for provider in providers:
         try:
-            # Retrieve the cost values from the provider object.
-            # (They will match your front-end numbers whether the provider is default or custom.)
             input_rate = float(provider.get("inputCost", 0))
             output_rate = float(provider.get("outputCost", 0))
         except ValueError:
@@ -43,4 +75,5 @@ async def calculate_cost(request: dict):
             "total_cost": round(input_cost + output_cost, 2)
         })
     
+    print("Calculation results:", results)
     return results
