@@ -8,6 +8,7 @@ export default function App() {
   const [results, setResults] = useState([]);
   const [tokens, setTokens] = useState({ input: 1000, output: 500 });
   const [selectedProviders, setSelectedProviders] = useState([]);
+  const [searchQuery, setSearchQuery] = useState(''); // Add search state here
 
   // Fetch default providers from your backend (/pricing)
   const [defaultProviders, setDefaultProviders] = useState([]);
@@ -15,12 +16,16 @@ export default function App() {
   useEffect(() => {
     async function fetchPricing() {
       try {
-        const response = await fetch('http://localhost:8000/pricing');
+        const response = await fetch('http://localhost:8000/pricing');  // Changed back to port 8000
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const data = await response.json();
         console.log("Fetched default providers:", data);
         setDefaultProviders(data);
       } catch (error) {
         console.error('Error fetching pricing:', error);
+        setDefaultProviders([]); // Set empty array on error
       }
     }
     fetchPricing();
@@ -61,6 +66,31 @@ export default function App() {
         .filter(i => i !== index)
         .map(i => i > index ? i - 1 : i)
     );
+  };
+
+  const deleteSelectedProviders = () => {
+    const defaultLen = defaultProviders.length;
+    
+    // Get indices of selected custom providers
+    const customIndices = selectedProviders
+      .filter(index => index >= defaultLen)
+      .map(index => index - defaultLen);
+
+    // Delete from customProviders
+    setCustomProviders(prev => 
+      prev.filter((_, index) => !customIndices.includes(index))
+    );
+
+    // Update selectedProviders state
+    setSelectedProviders(prev => {
+      const deletedIndices = new Set(customIndices.map(c => c + defaultLen));
+      return prev
+        .filter(i => !deletedIndices.has(i))
+        .map(i => {
+          const numDeletedBefore = customIndices.filter(c => (c + defaultLen) < i).length;
+          return i - numDeletedBefore;
+        });
+    });
   };
 
   const updateProvider = () => {
@@ -121,7 +151,7 @@ export default function App() {
     console.log("Selected providers data:", selectedProvidersData);
 
     try {
-      const response = await fetch('http://localhost:8000/calculate', {
+      const response = await fetch('http://localhost:8000/calculate', {  // Changed back to port 8000
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -130,11 +160,15 @@ export default function App() {
           custom_providers: selectedProvidersData
         })
       });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
       const data = await response.json();
       console.log("Calculation response:", data);
       setResults(data);
     } catch (error) {
       console.error("Error during calculation:", error);
+      setResults([]); // Set empty array on error
     }
   };
 
@@ -428,6 +462,10 @@ export default function App() {
         </div>
       </div>
 
+      {/* Remove this incorrect state declaration */}
+      {/* // Add this new state for search
+          const [searchQuery, setSearchQuery] = useState(''); */}
+      
       {/* Providers list */}
       {(defaultProviders.length > 0 || customProviders.length > 0) && (
         <div
@@ -488,76 +526,115 @@ export default function App() {
               >
                 Deselect All
               </button>
-            </div>
-          </div>
-          <div style={{ display: 'grid', gap: '14px' }}>
-            {[...defaultProviders, ...customProviders].map((provider, index) => (
-              <div
-                key={index}
+              <button
+                onClick={deleteSelectedProviders}
+                disabled={selectedProviders.length === 0}
                 style={{
-                  padding: '14px',
-                  backgroundColor: '#f8fafc',
-                  borderRadius: '7px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  border: '1px solid #e2e8f0'
+                  padding: '6px 12px',
+                  backgroundColor: selectedProviders.length === 0 ? '#CBD5E0' : '#718096',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '5px',
+                  fontSize: '0.85rem',
+                  fontWeight: '500',
+                  cursor: selectedProviders.length === 0 ? 'not-allowed' : 'pointer',
+                  opacity: selectedProviders.length === 0 ? 0.6 : 1
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedProviders.includes(index)}
-                    onChange={() => toggleProvider(index)}
-                    style={{
-                      width: '16px',
-                      height: '16px',
-                      cursor: 'pointer'
-                    }}
-                  />
-                  <div>
-                    <strong style={{ fontSize: '1rem', color: '#2d3748' }}>
-                      {provider.name} - {provider.model}
-                    </strong>
-                    <div style={{ marginTop: '4px', color: '#4a5568', fontSize: '0.85rem' }}>
-                      Input Cost: ${provider.inputCost} / Output Cost: ${provider.outputCost}
+                Delete Selected
+              </button>
+            </div>
+          </div>
+          
+          {/* Add search input */}
+          <div style={{ marginBottom: '1rem' }}>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search providers..."
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                border: '1px solid #e2e8f0',
+                fontSize: '0.95rem'
+              }}
+            />
+          </div>
+          <div style={{ display: 'grid', gap: '14px' }}>
+            {[...defaultProviders, ...customProviders]
+              .filter(provider => 
+                provider.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                provider.model.toLowerCase().includes(searchQuery.toLowerCase())
+              )
+              .map((provider, index) => (
+                <div
+                  key={index}
+                  style={{
+                    padding: '14px',
+                    backgroundColor: '#f8fafc',
+                    borderRadius: '7px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    border: '1px solid #e2e8f0'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedProviders.includes(index)}
+                      onChange={() => toggleProvider(index)}
+                      style={{
+                        width: '16px',
+                        height: '16px',
+                        cursor: 'pointer'
+                      }}
+                    />
+                    <div>
+                      <strong style={{ fontSize: '1rem', color: '#2d3748' }}>
+                        {provider.name} - {provider.model}
+                      </strong>
+                      <div style={{ marginTop: '4px', color: '#4a5568', fontSize: '0.85rem' }}>
+                        Input Cost: ${provider.inputCost} / Output Cost: ${provider.outputCost}
+                      </div>
                     </div>
                   </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => editProvider(index)}
+                      style={{
+                        padding: '7px 14px',
+                        backgroundColor: '#ed8936',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '5px',
+                        fontSize: '0.85rem',
+                        fontWeight: '500',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => deleteProvider(index)}
+                      style={{
+                        padding: '7px 14px',
+                        backgroundColor: '#e53e3e',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '5px',
+                        fontSize: '0.85rem',
+                        fontWeight: '500',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    onClick={() => editProvider(index)}
-                    style={{
-                      padding: '7px 14px',
-                      backgroundColor: '#ed8936',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '5px',
-                      fontSize: '0.85rem',
-                      fontWeight: '500',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => deleteProvider(index)}
-                    style={{
-                      padding: '7px 14px',
-                      backgroundColor: '#e53e3e',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '5px',
-                      fontSize: '0.85rem',
-                      fontWeight: '500',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-            ))}
+              ))}
           </div>
         </div>
       )}
