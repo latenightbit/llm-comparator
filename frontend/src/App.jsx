@@ -5,18 +5,36 @@ import { Chart, registerables } from 'chart.js';
 Chart.register(...registerables);
 
 export default function App() {
+  // States for calculation, providers, tokens, etc.
   const [results, setResults] = useState([]);
   const [tokens, setTokens] = useState({ input: 1000, output: 500 });
   const [selectedProviders, setSelectedProviders] = useState([]);
-  const [searchQuery, setSearchQuery] = useState(''); // Add search state here
-
-  // Fetch default providers from your backend (/pricing)
+  const [searchQuery, setSearchQuery] = useState('');
   const [defaultProviders, setDefaultProviders] = useState([]);
-  
+
+  // State for benchmark table data (populated from .json files in your benchmarks folder)
+  const [benchmarkTableData, setBenchmarkTableData] = useState([]);
+  // State for individual model benchmarks (when clicking "Show Benchmarks")
+  const [benchmarks, setBenchmarks] = useState([]);
+
+  // Toggle states: all toggles are closed by default.
+  // Inner group toggles (by group key)
+  const [expandedProviders, setExpandedProviders] = useState({});
+  // Outer source toggles ("openRouter" and "custom")
+  const [expandedSource, setExpandedSource] = useState({
+    openRouter: false,
+    custom: false
+  });
+
+  // Sorting states for the benchmark table.
+  const [sortKey, setSortKey] = useState("name");
+  const [sortDirection, setSortDirection] = useState("desc");
+
+  // Fetch default providers (e.g., from OpenRouter)
   useEffect(() => {
     async function fetchPricing() {
       try {
-        const response = await fetch('http://localhost:8000/pricing');  // Changed back to port 8000
+        const response = await fetch('http://localhost:8000/pricing');
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -25,13 +43,33 @@ export default function App() {
         setDefaultProviders(data);
       } catch (error) {
         console.error('Error fetching pricing:', error);
-        setDefaultProviders([]); // Set empty array on error
+        setDefaultProviders([]);
       }
     }
     fetchPricing();
   }, []);
 
-  // Custom providers (persisted to localStorage)
+  // Fetch benchmark table data from your backend (which reads the JSON files in the benchmarks folder)
+  useEffect(() => {
+    async function fetchBenchmarkTable() {
+      try {
+        const response = await fetch(
+          `http://localhost:8000/benchmark-table?sort_key=${sortKey}&direction=${sortDirection}`
+        );
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        console.log("Fetched benchmark table data:", data);
+        setBenchmarkTableData(data);
+      } catch (error) {
+        console.error("Error fetching benchmark table data:", error);
+      }
+    }
+    fetchBenchmarkTable();
+  }, [sortKey, sortDirection]);
+
+  // Custom providers stored in localStorage
   const [customProviders, setCustomProviders] = useState(() => {
     const saved = localStorage.getItem('customProviders');
     return saved ? JSON.parse(saved) : [];
@@ -43,8 +81,7 @@ export default function App() {
     outputCost: 0
   });
   const [editingIndex, setEditingIndex] = useState(null);
-  
-  // Persist customProviders in localStorage
+
   useEffect(() => {
     localStorage.setItem('customProviders', JSON.stringify(customProviders));
   }, [customProviders]);
@@ -60,44 +97,45 @@ export default function App() {
   };
 
   const deleteProvider = (index) => {
-    setCustomProviders(prevProviders => prevProviders.filter((_, i) => i !== index));
+    // Do not allow deletion of default (OpenRouter) providers.
+    if (index < defaultProviders.length) {
+      console.warn("Cannot delete OpenRouter provider");
+    } else {
+      setCustomProviders(prev =>
+        prev.filter((_, i) => i !== index - defaultProviders.length)
+      );
+    }
     setSelectedProviders(prev =>
-      prev
-        .filter(i => i !== index)
-        .map(i => i > index ? i - 1 : i)
+      prev.filter(i => i !== index).map(i => (i > index ? i - 1 : i))
     );
   };
 
   const deleteSelectedProviders = () => {
     const defaultLen = defaultProviders.length;
-    
-    // Get indices of selected custom providers
     const customIndices = selectedProviders
       .filter(index => index >= defaultLen)
       .map(index => index - defaultLen);
 
-    // Delete from customProviders
-    setCustomProviders(prev => 
+    setCustomProviders(prev =>
       prev.filter((_, index) => !customIndices.includes(index))
     );
 
-    // Update selectedProviders state
     setSelectedProviders(prev => {
-      const deletedIndices = new Set(customIndices.map(c => c + defaultLen));
+      const deleted = new Set(customIndices.map(c => c + defaultLen));
       return prev
-        .filter(i => !deletedIndices.has(i))
+        .filter(i => !deleted.has(i))
         .map(i => {
-          const numDeletedBefore = customIndices.filter(c => (c + defaultLen) < i).length;
-          return i - numDeletedBefore;
+          const countBefore = customIndices.filter(c => (c + defaultLen) < i).length;
+          return i - countBefore;
         });
     });
   };
 
   const updateProvider = () => {
     if (editingIndex !== null) {
-      const updatedProviders = [...customProviders];
-      updatedProviders[editingIndex] = { ...newProvider };
-      setCustomProviders(updatedProviders);
+      const updated = [...customProviders];
+      updated[editingIndex] = { ...newProvider };
+      setCustomProviders(updated);
       setNewProvider({ name: '', model: '', inputCost: 0, outputCost: 0 });
       setEditingIndex(null);
     }
@@ -119,14 +157,46 @@ export default function App() {
   };
 
   const toggleProvider = (index) => {
-    setSelectedProviders(prev => 
-      prev.includes(index) 
+    setSelectedProviders(prev =>
+      prev.includes(index)
         ? prev.filter(i => i !== index)
         : [...prev, index]
     );
   };
 
-  // When selectedProviders changes, recalculate or clear results.
+  // --- Grouping helper ---
+  // For grouping providers we use the text before "/" in the model field.
+  // If that text includes "mistral" (case-insensitive), force the group key to "Mistral".
+  function getGroupKey(provider) {
+    if (provider.model && provider.model.includes('/')) {
+      const prefix = provider.model.split('/')[0].trim();
+      if (prefix.toLowerCase().includes("mistral")) {
+        return "Mistral";
+      }
+      return prefix;
+    } else if (provider.name.includes(':')) {
+      return provider.name.split(':')[0].trim();
+    }
+    return provider.name;
+  }
+
+  // Toggle functions for inner and outer groups (default closed)
+  const toggleProviderGroup = (groupKey) => {
+    const isExpanded = expandedProviders[groupKey] === undefined ? false : expandedProviders[groupKey];
+    setExpandedProviders(prev => ({
+      ...prev,
+      [groupKey]: !isExpanded
+    }));
+  };
+
+  const toggleSourceGroup = (source) => {
+    setExpandedSource(prev => ({
+      ...prev,
+      [source]: !prev[source]
+    }));
+  };
+
+  // Recalculate results when selectedProviders changes.
   useEffect(() => {
     if (selectedProviders.length > 0) {
       calculateCost();
@@ -136,28 +206,26 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProviders]);
 
-  // Calculate cost function – exits early if no providers are selected.
   const calculateCost = async () => {
     if (selectedProviders.length === 0) {
       setResults([]);
       return;
     }
-    // Combine default (dynamic) providers with custom ones.
     const allProviders = [...defaultProviders, ...customProviders];
     console.log("All providers:", allProviders);
-    const selectedProvidersData = allProviders.filter((_, index) => 
+    const selectedData = allProviders.filter((_, index) =>
       selectedProviders.includes(index)
     );
-    console.log("Selected providers data:", selectedProvidersData);
+    console.log("Selected providers data:", selectedData);
 
     try {
-      const response = await fetch('http://localhost:8000/calculate', {  // Changed back to port 8000
+      const response = await fetch('http://localhost:8000/calculate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           input_tokens: tokens.input,
           output_tokens: tokens.output,
-          custom_providers: selectedProvidersData
+          custom_providers: selectedData
         })
       });
       if (!response.ok) {
@@ -166,28 +234,98 @@ export default function App() {
       const data = await response.json();
       console.log("Calculation response:", data);
       setResults(data);
+      setBenchmarks([]);
     } catch (error) {
       console.error("Error during calculation:", error);
-      setResults([]); // Set empty array on error
+      setResults([]);
     }
   };
 
-  // Select all providers (both default and custom)
-  const selectAllProviders = () => {
-    const totalProviders = defaultProviders.length + customProviders.length;
-    setSelectedProviders(Array.from({ length: totalProviders }, (_, i) => i));
+  // Fetch benchmarks for an individual model (when clicking "Show Benchmarks")
+  const handleCalculateBenchmarks = async (modelName) => {
+    try {
+      const encoded = encodeURIComponent(modelName);
+      const benchRes = await fetch(`http://localhost:8000/benchmarks/${encoded}`);
+      if (!benchRes.ok) {
+        throw new Error(`HTTP error! status: ${benchRes.status}`);
+      }
+      const benchData = await benchRes.json();
+      console.log("Benchmarks for", modelName, ":", benchData);
+      setBenchmarks(benchData);
+    } catch (error) {
+      console.error("Error fetching benchmarks:", error);
+      setBenchmarks([]);
+    }
   };
 
-  // Token input change handler to trigger recalculation
+  // Select all providers (default + custom)
+  const selectAllProviders = () => {
+    const total = defaultProviders.length + customProviders.length;
+    setSelectedProviders(Array.from({ length: total }, (_, i) => i));
+  };
+
+  // Token input change handler
   const handleTokenChange = (type, value) => {
-    const newValue = parseInt(value.replace(/,/g, '')) || 0;
+    const newVal = parseInt(value.replace(/,/g, '')) || 0;
     setTokens(prev => ({
       ...prev,
-      [type]: newValue
+      [type]: newVal
     }));
     if (selectedProviders.length > 0) {
       calculateCost();
     }
+  };
+
+  // ===== Prepare filtered and grouped providers =====
+  const filteredOpenRouter = defaultProviders
+    .filter(provider =>
+      provider.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      provider.model.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .map((provider, i) => ({ ...provider, originalIndex: i }));
+
+  const filteredCustom = customProviders
+    .filter(provider =>
+      provider.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      provider.model.toLowerCase().includes(searchQuery.toLowerCase())
+    )
+    .map((provider, i) => ({ ...provider, originalIndex: defaultProviders.length + i }));
+
+  const groupedOpenRouter = filteredOpenRouter.reduce((acc, provider) => {
+    const key = getGroupKey(provider);
+    if (!acc[key]) {
+      acc[key] = [];
+    }
+    acc[key].push(provider);
+    return acc;
+  }, {});
+
+  const groupedCustom = filteredCustom.reduce((acc, provider) => {
+    const key = getGroupKey(provider);
+    if (!acc[key]) {
+      acc[key] = [];
+    }
+    acc[key].push(provider);
+    return acc;
+  }, {});
+
+  // ===== Sorting functions for benchmark table =====
+  const handleSort = (key) => {
+    if (sortKey === key) {
+      setSortDirection(prev => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDirection("desc");
+    }
+  };
+
+  // Modified renderSortArrow: always returns an arrow.
+  const renderSortArrow = (key) => {
+    if (sortKey === key) {
+      return sortDirection === "asc" ? " ▲" : " ▼";
+    }
+    // For non-active columns, show a default down arrow.
+    return " ▼";
   };
 
   return (
@@ -196,31 +334,184 @@ export default function App() {
         maxWidth: '1080px',
         margin: '0 auto',
         padding: '36px 18px',
-        fontFamily:
-          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
         fontSize: '0.9rem'
       }}
     >
-      <h1
-        style={{
-          fontSize: '2.25rem',
-          fontWeight: '700',
-          marginBottom: '1.8rem',
-          color: '#1a1a1a'
-        }}
-      >
+      <h1 style={{ fontSize: '2.25rem', fontWeight: '700', marginBottom: '1.8rem', color: '#1a1a1a' }}>
         LLM Cost Calculator
       </h1>
 
-      {/* Token inputs container */}
+      {/* --- Benchmark Comparison Table Section --- */}
+      <div style={{ marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: '600', marginBottom: '1rem' }}>
+          Model Comparison
+        </h2>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+          <thead>
+            <tr style={{ backgroundColor: '#f7fafc' }}>
+              <th
+                onClick={() => handleSort("organization")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+              >
+                Organization{renderSortArrow("organization")}
+              </th>
+              <th
+                onClick={() => handleSort("name")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+              >
+                Model{renderSortArrow("name")}
+              </th>
+              <th
+                onClick={() => handleSort("license")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+              >
+                License{renderSortArrow("license")}
+              </th>
+              <th
+                onClick={() => handleSort("parameters")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+              >
+                Parameters (B){renderSortArrow("parameters")}
+              </th>
+              <th
+                onClick={() => handleSort("context")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+              >
+                Context{renderSortArrow("context")}
+              </th>
+              <th
+                onClick={() => handleSort("inputCost")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+              >
+                Input $/M{renderSortArrow("inputCost")}
+              </th>
+              <th
+                onClick={() => handleSort("outputCost")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+              >
+                Output $/M{renderSortArrow("outputCost")}
+              </th>
+              <th
+                onClick={() => handleSort("GPQA")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+              >
+                GPQA{renderSortArrow("GPQA")}
+              </th>
+              <th
+                onClick={() => handleSort("MMLU")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+              >
+                MMLU{renderSortArrow("MMLU")}
+              </th>
+              <th
+                onClick={() => handleSort("MMLUPro")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+              >
+                MMLU Pro{renderSortArrow("MMLUPro")}
+              </th>
+              <th
+                onClick={() => handleSort("DROP")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+              >
+                DROP{renderSortArrow("DROP")}
+              </th>
+              <th
+                onClick={() => handleSort("HumanEval")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+              >
+                HumanEval{renderSortArrow("HumanEval")}
+              </th>
+              <th
+                onClick={() => handleSort("multimodal")}
+                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer', textAlign: 'center' }}
+              >
+                Multimodal{renderSortArrow("multimodal")}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {benchmarkTableData && benchmarkTableData.length > 0 ? (
+              benchmarkTableData.map((bench, idx) => {
+                const paramsB = bench.param_count ? (bench.param_count / 1e9).toFixed(0) : '-';
+                const context = bench.input_context_size ? bench.input_context_size.toLocaleString() : '-';
+                const inputCost = (typeof bench.inputCost === 'number')
+                  ? `$${bench.inputCost.toFixed(2)}`
+                  : '-';
+                const outputCost = (typeof bench.outputCost === 'number')
+                  ? `$${bench.outputCost.toFixed(2)}`
+                  : '-';
+
+                const getMetric = (dataset) => {
+                  const metric = bench.qualitative_metrics?.find(
+                    m => m.dataset_name.toLowerCase() === dataset.toLowerCase()
+                  );
+                  return metric ? `${(metric.score * 100).toFixed(1)}%` : '-';
+                };
+
+                return (
+                  <tr key={idx}>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                      {bench.organization || '-'}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                      {bench.name || '-'}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                      {bench.license || '-'}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                      {paramsB}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                      {context}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                      {inputCost}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                      {outputCost}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                      {getMetric("GPQA")}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                      {getMetric("MMLU")}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                      {getMetric("MMLU-Pro")}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                      {getMetric("DROP")}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                      {getMetric("HumanEval")}
+                    </td>
+                    <td style={{ padding: '8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+                      {bench.multimodal ? '✓' : '-'}
+                    </td>
+                  </tr>
+                );
+              })
+            ) : (
+              <tr>
+                <td colSpan="13" style={{ padding: '8px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
+                  Loading benchmark data...
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* --- Token Inputs Section --- */}
       <div
         style={{
           margin: '1.8rem 0',
           padding: '1.8rem',
           backgroundColor: 'white',
           borderRadius: '10px',
-          boxShadow:
-            '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)'
         }}
       >
         <div
@@ -233,13 +524,7 @@ export default function App() {
           }}
         >
           <div style={{ flex: 1 }}>
-            <div
-              style={{
-                marginBottom: '8px',
-                fontWeight: '500',
-                color: '#4a5568'
-              }}
-            >
+            <div style={{ marginBottom: '8px', fontWeight: '500', color: '#4a5568' }}>
               Input Tokens
             </div>
             <input
@@ -261,13 +546,7 @@ export default function App() {
             />
           </div>
           <div style={{ flex: 1 }}>
-            <div
-              style={{
-                marginBottom: '8px',
-                fontWeight: '500',
-                color: '#4a5568'
-              }}
-            >
+            <div style={{ marginBottom: '8px', fontWeight: '500', color: '#4a5568' }}>
               Output Tokens
             </div>
             <input
@@ -293,15 +572,13 @@ export default function App() {
             disabled={selectedProviders.length === 0}
             style={{
               padding: '8px 20px',
-              backgroundColor:
-                selectedProviders.length === 0 ? '#a0aec0' : '#3182ce',
+              backgroundColor: selectedProviders.length === 0 ? '#a0aec0' : '#3182ce',
               color: 'white',
               border: 'none',
               borderRadius: '6px',
               fontSize: '0.95rem',
               fontWeight: '500',
-              cursor:
-                selectedProviders.length === 0 ? 'not-allowed' : 'pointer',
+              cursor: selectedProviders.length === 0 ? 'not-allowed' : 'pointer',
               transition: 'background-color 0.2s',
               minWidth: '120px'
             }}
@@ -311,26 +588,18 @@ export default function App() {
         </div>
       </div>
 
-      {/* Custom provider form */}
+      {/* --- Custom Provider Form Section --- */}
       <div
         style={{
           margin: '2rem 0',
           padding: '2rem',
           backgroundColor: 'white',
           borderRadius: '12px',
-          boxShadow:
-            '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+          boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)'
         }}
       >
         <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
-          <h3
-            style={{
-              fontSize: '1.35rem',
-              fontWeight: '600',
-              marginBottom: '1.35rem',
-              color: '#2d3748'
-            }}
-          >
+          <h3 style={{ fontSize: '1.35rem', fontWeight: '600', marginBottom: '1.35rem', color: '#2d3748' }}>
             {editingIndex !== null ? 'Edit Provider' : 'Add Custom Provider'}
           </h3>
           <div
@@ -344,9 +613,7 @@ export default function App() {
             <input
               type="text"
               value={newProvider.name}
-              onChange={e =>
-                setNewProvider({ ...newProvider, name: e.target.value })
-              }
+              onChange={e => setNewProvider({ ...newProvider, name: e.target.value })}
               placeholder="Provider Name"
               style={{
                 width: '100%',
@@ -359,9 +626,7 @@ export default function App() {
             <input
               type="text"
               value={newProvider.model}
-              onChange={e =>
-                setNewProvider({ ...newProvider, model: e.target.value })
-              }
+              onChange={e => setNewProvider({ ...newProvider, model: e.target.value })}
               placeholder="Model Name"
               style={{
                 width: '100%',
@@ -377,10 +642,7 @@ export default function App() {
               onChange={e =>
                 setNewProvider({
                   ...newProvider,
-                  inputCost: Math.max(
-                    0,
-                    Number(parseFloat(e.target.value).toFixed(2))
-                  )
+                  inputCost: Math.max(0, Number(parseFloat(e.target.value).toFixed(2)))
                 })
               }
               min="0"
@@ -400,10 +662,7 @@ export default function App() {
               onChange={e =>
                 setNewProvider({
                   ...newProvider,
-                  outputCost: Math.max(
-                    0,
-                    Number(parseFloat(e.target.value).toFixed(2))
-                  )
+                  outputCost: Math.max(0, Number(parseFloat(e.target.value).toFixed(2)))
                 })
               }
               min="0"
@@ -418,14 +677,7 @@ export default function App() {
               }}
             />
           </div>
-          <div
-            style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'center',
-              marginTop: '40px'
-            }}
-          >
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '40px' }}>
             <button
               onClick={addCustomProvider}
               style={{
@@ -462,22 +714,18 @@ export default function App() {
         </div>
       </div>
 
-      {/* Remove this incorrect state declaration */}
-      {/* // Add this new state for search
-          const [searchQuery, setSearchQuery] = useState(''); */}
-      
-      {/* Providers list */}
-      {(defaultProviders.length > 0 || customProviders.length > 0) && (
+      {/* --- Providers Toggle List Section --- */}
+      {(filteredOpenRouter.length > 0 || filteredCustom.length > 0) && (
         <div
           style={{
             margin: '1.8rem 0',
             padding: '1.8rem',
             backgroundColor: 'white',
             borderRadius: '10px',
-            boxShadow:
-              '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+            boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)'
           }}
         >
+          {/* Top controls */}
           <div
             style={{
               display: 'flex',
@@ -486,15 +734,7 @@ export default function App() {
               marginBottom: '1.35rem'
             }}
           >
-            <h3
-              style={{
-                fontSize: '1.35rem',
-                fontWeight: '600',
-                color: '#2d3748'
-              }}
-            >
-              Providers
-            </h3>
+            <h3 style={{ fontSize: '1.35rem', fontWeight: '600', color: '#2d3748' }}>Providers</h3>
             <div style={{ display: 'flex', gap: '10px' }}>
               <button
                 onClick={selectAllProviders}
@@ -545,8 +785,7 @@ export default function App() {
               </button>
             </div>
           </div>
-          
-          {/* Add search input */}
+          {/* Search input */}
           <div style={{ marginBottom: '1rem' }}>
             <input
               type="text"
@@ -562,84 +801,250 @@ export default function App() {
               }}
             />
           </div>
-          <div style={{ display: 'grid', gap: '14px' }}>
-            {[...defaultProviders, ...customProviders]
-              .filter(provider => 
-                provider.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                provider.model.toLowerCase().includes(searchQuery.toLowerCase())
-              )
-              .map((provider, index) => (
-                <div
-                  key={index}
-                  style={{
-                    padding: '14px',
-                    backgroundColor: '#f8fafc',
-                    borderRadius: '7px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    border: '1px solid #e2e8f0'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <input
-                      type="checkbox"
-                      checked={selectedProviders.includes(index)}
-                      onChange={() => toggleProvider(index)}
+
+          {/* ----- OpenRouter Providers Section ----- */}
+          {filteredOpenRouter.length > 0 && (
+            <div style={{ marginBottom: '1rem' }}>
+              <div
+                onClick={() => toggleSourceGroup('openRouter')}
+                style={{
+                  padding: '14px',
+                  backgroundColor: '#cbd5e0',
+                  borderRadius: '7px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontWeight: 'bold',
+                  color: '#2d3748'
+                }}
+              >
+                <span>OpenRouter Providers</span>
+                <span>{expandedSource.openRouter ? '▼' : '►'}</span>
+              </div>
+              {expandedSource.openRouter &&
+                Object.entries(groupedOpenRouter).map(([groupKey, providers]) => (
+                  <div
+                    key={`openRouter-${groupKey}`}
+                    style={{
+                      backgroundColor: '#f8fafc',
+                      borderRadius: '7px',
+                      border: '1px solid #e2e8f0',
+                      marginTop: '8px'
+                    }}
+                  >
+                    <div
+                      onClick={() => toggleProviderGroup(`openRouter-${groupKey}`)}
                       style={{
-                        width: '16px',
-                        height: '16px',
-                        cursor: 'pointer'
+                        padding: '14px',
+                        backgroundColor: '#f1f5f9',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        fontWeight: 'bold',
+                        color: '#2d3748'
                       }}
-                    />
-                    <div>
-                      <strong style={{ fontSize: '1rem', color: '#2d3748' }}>
-                        {provider.name} - {provider.model}
-                      </strong>
-                      <div style={{ marginTop: '4px', color: '#4a5568', fontSize: '0.85rem' }}>
-                        Input Cost: ${provider.inputCost} / Output Cost: ${provider.outputCost}
-                      </div>
+                    >
+                      <span>{groupKey}</span>
+                      <span>
+                        {(expandedProviders[`openRouter-${groupKey}`] === undefined ||
+                          expandedProviders[`openRouter-${groupKey}`])
+                          ? '▼'
+                          : '►'}
+                      </span>
                     </div>
+                    {(expandedProviders[`openRouter-${groupKey}`] === undefined ||
+                      expandedProviders[`openRouter-${groupKey}`]) &&
+                      providers.map(
+                        ({ name, model, inputCost, outputCost, originalIndex }) => (
+                          <div
+                            key={originalIndex}
+                            style={{
+                              padding: '14px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              borderTop: '1px solid #e2e8f0'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <input
+                                type="checkbox"
+                                checked={selectedProviders.includes(originalIndex)}
+                                onChange={() => toggleProvider(originalIndex)}
+                                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                              />
+                              <div>
+                                <div style={{ fontSize: '1rem', color: '#2d3748' }}>{model}</div>
+                                <div style={{ marginTop: '4px', color: '#4a5568', fontSize: '0.85rem' }}>
+                                  Input Cost: ${inputCost} / Output Cost: ${outputCost}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button
+                                onClick={() => editProvider(originalIndex)}
+                                style={{
+                                  padding: '7px 14px',
+                                  backgroundColor: '#ed8936',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '5px',
+                                  fontSize: '0.85rem',
+                                  fontWeight: '500',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => deleteProvider(originalIndex)}
+                                style={{
+                                  padding: '7px 14px',
+                                  backgroundColor: '#e53e3e',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '5px',
+                                  fontSize: '0.85rem',
+                                  fontWeight: '500',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      )}
                   </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      onClick={() => editProvider(index)}
+                ))}
+            </div>
+          )}
+
+          {/* ----- Custom Providers Section ----- */}
+          {filteredCustom.length > 0 && (
+            <div style={{ marginBottom: '1rem' }}>
+              <div
+                onClick={() => toggleSourceGroup('custom')}
+                style={{
+                  padding: '14px',
+                  backgroundColor: '#cbd5e0',
+                  borderRadius: '7px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontWeight: 'bold',
+                  color: '#2d3748'
+                }}
+              >
+                <span>Custom Providers</span>
+                <span>{expandedSource.custom ? '▼' : '►'}</span>
+              </div>
+              {expandedSource.custom &&
+                Object.entries(groupedCustom).map(([groupKey, providers]) => (
+                  <div
+                    key={`custom-${groupKey}`}
+                    style={{
+                      backgroundColor: '#f8fafc',
+                      borderRadius: '7px',
+                      border: '1px solid #e2e8f0',
+                      marginTop: '8px'
+                    }}
+                  >
+                    <div
+                      onClick={() => toggleProviderGroup(`custom-${groupKey}`)}
                       style={{
-                        padding: '7px 14px',
-                        backgroundColor: '#ed8936',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '5px',
-                        fontSize: '0.85rem',
-                        fontWeight: '500',
-                        cursor: 'pointer'
+                        padding: '14px',
+                        backgroundColor: '#f1f5f9',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        fontWeight: 'bold',
+                        color: '#2d3748'
                       }}
                     >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => deleteProvider(index)}
-                      style={{
-                        padding: '7px 14px',
-                        backgroundColor: '#e53e3e',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '5px',
-                        fontSize: '0.85rem',
-                        fontWeight: '500',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Delete
-                    </button>
+                      <span>{groupKey}</span>
+                      <span>
+                        {(expandedProviders[`custom-${groupKey}`] === undefined ||
+                          expandedProviders[`custom-${groupKey}`])
+                          ? '▼'
+                          : '►'}
+                      </span>
+                    </div>
+                    {(expandedProviders[`custom-${groupKey}`] === undefined ||
+                      expandedProviders[`custom-${groupKey}`]) &&
+                      providers.map(
+                        ({ name, model, inputCost, outputCost, originalIndex }) => (
+                          <div
+                            key={originalIndex}
+                            style={{
+                              padding: '14px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              borderTop: '1px solid #e2e8f0'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                              <input
+                                type="checkbox"
+                                checked={selectedProviders.includes(originalIndex)}
+                                onChange={() => toggleProvider(originalIndex)}
+                                style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                              />
+                              <div>
+                                <div style={{ fontSize: '1rem', color: '#2d3748' }}>{model}</div>
+                                <div style={{ marginTop: '4px', color: '#4a5568', fontSize: '0.85rem' }}>
+                                  Input Cost: ${inputCost} / Output Cost: ${outputCost}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button
+                                onClick={() => editProvider(originalIndex)}
+                                style={{
+                                  padding: '7px 14px',
+                                  backgroundColor: '#ed8936',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '5px',
+                                  fontSize: '0.85rem',
+                                  fontWeight: '500',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => deleteProvider(originalIndex)}
+                                style={{
+                                  padding: '7px 14px',
+                                  backgroundColor: '#e53e3e',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: '5px',
+                                  fontSize: '0.85rem',
+                                  fontWeight: '500',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      )}
                   </div>
-                </div>
-              ))}
-          </div>
+                ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Results section */}
+      {/* --- Results Section --- */}
       {results.length > 0 && (
         <div
           style={{
@@ -647,22 +1052,31 @@ export default function App() {
             padding: '2rem',
             backgroundColor: 'white',
             borderRadius: '12px',
-            boxShadow:
-              '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+            boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06)'
           }}
         >
           <div style={{ height: '400px', marginBottom: '2rem' }}>
             <Bar
               data={{
                 labels: results.map(r => `${r.provider} - ${r.model}`),
-                datasets: [{
-                  label: 'Total Cost ($)',
-                  data: results.map(r => r.total_cost),
-                  backgroundColor: [
-                    '#3182ce', '#38a169', '#805ad5', '#d53f8c', '#d69e2e',
-                    '#319795', '#744210', '#2c5282', '#285e61', '#702459'
-                  ].slice(0, results.length)
-                }]
+                datasets: [
+                  {
+                    label: 'Total Cost ($)',
+                    data: results.map(r => r.total_cost),
+                    backgroundColor: [
+                      '#3182ce',
+                      '#38a169',
+                      '#805ad5',
+                      '#d53f8c',
+                      '#d69e2e',
+                      '#319795',
+                      '#744210',
+                      '#2c5282',
+                      '#285e61',
+                      '#702459'
+                    ].slice(0, results.length)
+                  }
+                ]
               }}
               options={{
                 responsive: true,
@@ -670,7 +1084,7 @@ export default function App() {
                 plugins: {
                   legend: { display: false },
                   tooltip: {
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    backgroundColor: 'rgba(0,0,0,0.8)',
                     padding: 12,
                     titleFont: { size: 14, weight: 'bold' },
                     bodyFont: { size: 13 },
@@ -678,10 +1092,10 @@ export default function App() {
                       label: (context) => {
                         const value = context.raw;
                         const minCost = Math.min(...results.map(r => r.total_cost));
-                        const timesMoreExpensive = (value / minCost).toFixed(2);
+                        const multiplier = (value / minCost).toFixed(2);
                         return value === minCost
                           ? `$${value.toFixed(5)} (Cheapest)`
-                          : `$${value.toFixed(5)} (${timesMoreExpensive}x more expensive)`;
+                          : `$${value.toFixed(5)} (${multiplier}x more expensive)`;
                       }
                     }
                   }
@@ -693,10 +1107,21 @@ export default function App() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
             <thead>
               <tr style={{ backgroundColor: '#f7fafc' }}>
-                <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Provider</th>
-                <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Cost</th>
-                <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Input</th>
-                <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Output</th>
+                <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>
+                  Provider
+                </th>
+                <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>
+                  Cost
+                </th>
+                <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>
+                  Input
+                </th>
+                <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>
+                  Output
+                </th>
+                <th style={{ padding: '16px', textAlign: 'center', borderBottom: '2px solid #e2e8f0' }}>
+                  Benchmarks
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -706,10 +1131,49 @@ export default function App() {
                   <td style={{ padding: '16px' }}>${result.total_cost.toFixed(5)}</td>
                   <td style={{ padding: '16px' }}>${result.input_cost.toFixed(5)}</td>
                   <td style={{ padding: '16px' }}>${result.output_cost.toFixed(5)}</td>
+                  <td style={{ padding: '16px', textAlign: 'center' }}>
+                    <button
+                      onClick={() => handleCalculateBenchmarks(result.model)}
+                      style={{
+                        padding: '6px 12px',
+                        backgroundColor: '#3182ce',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '5px',
+                        fontSize: '0.85rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Show Benchmarks
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* --- Benchmarks Display Section --- */}
+      {benchmarks.length > 0 && (
+        <div
+          style={{
+            margin: '2rem 0',
+            padding: '1.5rem',
+            backgroundColor: 'white',
+            borderRadius: '8px',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+          }}
+        >
+          <h3 style={{ marginBottom: '1rem', color: '#2d3748' }}>Performance Benchmarks:</h3>
+          {benchmarks.map((b, i) => (
+            <div key={i} style={{ marginBottom: '0.75rem' }}>
+              <p style={{ margin: 0 }}>
+                <strong>{b.dataset_name}:</strong> {Math.round(b.score * 100)}%
+              </p>
+              <small style={{ color: '#4a5568' }}>Tested on {b.date_recorded}</small>
+            </div>
+          ))}
         </div>
       )}
     </div>
