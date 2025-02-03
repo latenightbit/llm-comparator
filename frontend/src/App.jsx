@@ -14,7 +14,7 @@ export default function App() {
 
   // State for benchmark table data (populated from .json files in your benchmarks folder)
   const [benchmarkTableData, setBenchmarkTableData] = useState([]);
-  // State for individual model benchmarks (when clicking "Show Benchmarks")
+  // State for individual model benchmarks (when clicking "Show Benchmarks") — not used in results table now.
   const [benchmarks, setBenchmarks] = useState([]);
 
   // Toggle states: all toggles are closed by default.
@@ -25,6 +25,9 @@ export default function App() {
     openRouter: false,
     custom: false
   });
+
+  // NEW: Toggle for showing/hiding the leaderboard (benchmark comparison table)
+  const [showLeaderboard, setShowLeaderboard] = useState(true);
 
   // Sorting states for the benchmark table.
   const [sortKey, setSortKey] = useState("name");
@@ -319,12 +322,13 @@ export default function App() {
     }
   };
 
-  // Modified renderSortArrow: always returns an arrow.
+  // Modified renderSortArrow: Always returns an arrow.
+  // For the active column, show ▲ (if ascending) or ▼ (if descending).
+  // For non-active columns, display a default down arrow.
   const renderSortArrow = (key) => {
     if (sortKey === key) {
       return sortDirection === "asc" ? " ▲" : " ▼";
     }
-    // For non-active columns, show a default down arrow.
     return " ▼";
   };
 
@@ -342,167 +346,187 @@ export default function App() {
         LLM Cost Calculator
       </h1>
 
-      {/* --- Benchmark Comparison Table Section --- */}
-      <div style={{ marginBottom: '2rem' }}>
-        <h2 style={{ fontSize: '1.5rem', fontWeight: '600', marginBottom: '1rem' }}>
-          Model Comparison
-        </h2>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-          <thead>
-            <tr style={{ backgroundColor: '#f7fafc' }}>
-              <th
-                onClick={() => handleSort("organization")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
-              >
-                Organization{renderSortArrow("organization")}
-              </th>
-              <th
-                onClick={() => handleSort("name")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
-              >
-                Model{renderSortArrow("name")}
-              </th>
-              <th
-                onClick={() => handleSort("license")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
-              >
-                License{renderSortArrow("license")}
-              </th>
-              <th
-                onClick={() => handleSort("parameters")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
-              >
-                Parameters (B){renderSortArrow("parameters")}
-              </th>
-              <th
-                onClick={() => handleSort("context")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
-              >
-                Context{renderSortArrow("context")}
-              </th>
-              <th
-                onClick={() => handleSort("inputCost")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
-              >
-                Input $/M{renderSortArrow("inputCost")}
-              </th>
-              <th
-                onClick={() => handleSort("outputCost")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
-              >
-                Output $/M{renderSortArrow("outputCost")}
-              </th>
-              <th
-                onClick={() => handleSort("GPQA")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
-              >
-                GPQA{renderSortArrow("GPQA")}
-              </th>
-              <th
-                onClick={() => handleSort("MMLU")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
-              >
-                MMLU{renderSortArrow("MMLU")}
-              </th>
-              <th
-                onClick={() => handleSort("MMLUPro")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
-              >
-                MMLU Pro{renderSortArrow("MMLUPro")}
-              </th>
-              <th
-                onClick={() => handleSort("DROP")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
-              >
-                DROP{renderSortArrow("DROP")}
-              </th>
-              <th
-                onClick={() => handleSort("HumanEval")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
-              >
-                HumanEval{renderSortArrow("HumanEval")}
-              </th>
-              <th
-                onClick={() => handleSort("multimodal")}
-                style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer', textAlign: 'center' }}
-              >
-                Multimodal{renderSortArrow("multimodal")}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {benchmarkTableData && benchmarkTableData.length > 0 ? (
-              benchmarkTableData.map((bench, idx) => {
-                const paramsB = bench.param_count ? (bench.param_count / 1e9).toFixed(0) : '-';
-                const context = bench.input_context_size ? bench.input_context_size.toLocaleString() : '-';
-                const inputCost = (typeof bench.inputCost === 'number')
-                  ? `$${bench.inputCost.toFixed(2)}`
-                  : '-';
-                const outputCost = (typeof bench.outputCost === 'number')
-                  ? `$${bench.outputCost.toFixed(2)}`
-                  : '-';
-
-                const getMetric = (dataset) => {
-                  const metric = bench.qualitative_metrics?.find(
-                    m => m.dataset_name.toLowerCase() === dataset.toLowerCase()
-                  );
-                  return metric ? `${(metric.score * 100).toFixed(1)}%` : '-';
-                };
-
-                return (
-                  <tr key={idx}>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
-                      {bench.organization || '-'}
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
-                      {bench.name || '-'}
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
-                      {bench.license || '-'}
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
-                      {paramsB}
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
-                      {context}
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
-                      {inputCost}
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
-                      {outputCost}
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
-                      {getMetric("GPQA")}
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
-                      {getMetric("MMLU")}
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
-                      {getMetric("MMLU-Pro")}
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
-                      {getMetric("DROP")}
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
-                      {getMetric("HumanEval")}
-                    </td>
-                    <td style={{ padding: '8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                      {bench.multimodal ? '✓' : '-'}
-                    </td>
-                  </tr>
-                );
-              })
-            ) : (
-              <tr>
-                <td colSpan="13" style={{ padding: '8px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
-                  Loading benchmark data...
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      {/* --- Leaderboard Toggle Button --- */}
+      <div style={{ marginBottom: '1rem' }}>
+        <button
+          onClick={() => setShowLeaderboard(prev => !prev)}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: '#3182ce',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            fontSize: '0.95rem',
+            cursor: 'pointer'
+          }}
+        >
+          {showLeaderboard ? "Hide Leaderboard" : "Show Leaderboard"}
+        </button>
       </div>
+
+      {/* --- Benchmark Comparison Table Section --- */}
+      {showLeaderboard && (
+        <div style={{ marginBottom: '2rem' }}>
+          <h2 style={{ fontSize: '1.5rem', fontWeight: '600', marginBottom: '1rem' }}>
+            Model Comparison
+          </h2>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
+            <thead>
+              <tr style={{ backgroundColor: '#f7fafc' }}>
+                <th
+                  onClick={() => handleSort("organization")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                >
+                  Organization{renderSortArrow("organization")}
+                </th>
+                <th
+                  onClick={() => handleSort("name")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                >
+                  Model{renderSortArrow("name")}
+                </th>
+                <th
+                  onClick={() => handleSort("license")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                >
+                  License{renderSortArrow("license")}
+                </th>
+                <th
+                  onClick={() => handleSort("parameters")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                >
+                  Parameters (B){renderSortArrow("parameters")}
+                </th>
+                <th
+                  onClick={() => handleSort("context")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                >
+                  Context{renderSortArrow("context")}
+                </th>
+                <th
+                  onClick={() => handleSort("inputCost")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                >
+                  Input $/M{renderSortArrow("inputCost")}
+                </th>
+                <th
+                  onClick={() => handleSort("outputCost")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                >
+                  Output $/M{renderSortArrow("outputCost")}
+                </th>
+                <th
+                  onClick={() => handleSort("GPQA")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                >
+                  GPQA{renderSortArrow("GPQA")}
+                </th>
+                <th
+                  onClick={() => handleSort("MMLU")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                >
+                  MMLU{renderSortArrow("MMLU")}
+                </th>
+                <th
+                  onClick={() => handleSort("MMLUPro")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                >
+                  MMLU Pro{renderSortArrow("MMLUPro")}
+                </th>
+                <th
+                  onClick={() => handleSort("DROP")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                >
+                  DROP{renderSortArrow("DROP")}
+                </th>
+                <th
+                  onClick={() => handleSort("HumanEval")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer' }}
+                >
+                  HumanEval{renderSortArrow("HumanEval")}
+                </th>
+                <th
+                  onClick={() => handleSort("multimodal")}
+                  style={{ padding: '8px', border: '1px solid #e2e8f0', cursor: 'pointer', textAlign: 'center' }}
+                >
+                  Multimodal{renderSortArrow("multimodal")}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {benchmarkTableData && benchmarkTableData.length > 0 ? (
+                benchmarkTableData.map((bench, idx) => {
+                  const paramsB = bench.param_count ? (bench.param_count / 1e9).toFixed(0) : '-';
+                  const context = bench.input_context_size ? bench.input_context_size.toLocaleString() : '-';
+                  const inputCost = (typeof bench.inputCost === 'number')
+                    ? `$${bench.inputCost.toFixed(2)}`
+                    : '-';
+                  const outputCost = (typeof bench.outputCost === 'number')
+                    ? `$${bench.outputCost.toFixed(2)}`
+                    : '-';
+
+                  const getMetric = (dataset) => {
+                    const metric = bench.qualitative_metrics?.find(
+                      m => m.dataset_name.toLowerCase() === dataset.toLowerCase()
+                    );
+                    return metric ? `${(metric.score * 100).toFixed(1)}%` : '-';
+                  };
+
+                  return (
+                    <tr key={idx}>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                        {bench.organization || '-'}
+                      </td>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                        {bench.name || '-'}
+                      </td>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                        {bench.license || '-'}
+                      </td>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                        {paramsB}
+                      </td>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                        {context}
+                      </td>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                        {inputCost}
+                      </td>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                        {outputCost}
+                      </td>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                        {getMetric("GPQA")}
+                      </td>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                        {getMetric("MMLU")}
+                      </td>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                        {getMetric("MMLU-Pro")}
+                      </td>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                        {getMetric("DROP")}
+                      </td>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0' }}>
+                        {getMetric("HumanEval")}
+                      </td>
+                      <td style={{ padding: '8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+                        {bench.multimodal ? '✓' : '-'}
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan="13" style={{ padding: '8px', textAlign: 'center', border: '1px solid #e2e8f0' }}>
+                    Loading benchmark data...
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* --- Token Inputs Section --- */}
       <div
@@ -1119,9 +1143,6 @@ export default function App() {
                 <th style={{ padding: '16px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>
                   Output
                 </th>
-                <th style={{ padding: '16px', textAlign: 'center', borderBottom: '2px solid #e2e8f0' }}>
-                  Benchmarks
-                </th>
               </tr>
             </thead>
             <tbody>
@@ -1131,22 +1152,6 @@ export default function App() {
                   <td style={{ padding: '16px' }}>${result.total_cost.toFixed(5)}</td>
                   <td style={{ padding: '16px' }}>${result.input_cost.toFixed(5)}</td>
                   <td style={{ padding: '16px' }}>${result.output_cost.toFixed(5)}</td>
-                  <td style={{ padding: '16px', textAlign: 'center' }}>
-                    <button
-                      onClick={() => handleCalculateBenchmarks(result.model)}
-                      style={{
-                        padding: '6px 12px',
-                        backgroundColor: '#3182ce',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '5px',
-                        fontSize: '0.85rem',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Show Benchmarks
-                    </button>
-                  </td>
                 </tr>
               ))}
             </tbody>
