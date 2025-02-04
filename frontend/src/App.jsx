@@ -1,6 +1,9 @@
 // src/App.jsx
 import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
+import FeaturesGrid from './components/FeaturesGrid'; // <-- newly added
+import Footer from './components/Footer'; // <-- newly added
+
 import BenchmarkTable from './components/BenchmarkTable';
 import TokenInputs from './components/TokenInputs';
 import ProviderList from './components/ProviderList';
@@ -182,6 +185,11 @@ export default function App() {
     return provider.name;
   }
 
+  const [resultsState, setResultsState] = useState([]); // DON'T REDECLARE 'results'!
+  // Just remove or rename if you see duplication. 
+  // We'll skip using resultsState for now—use 'results' from above.
+
+  const [calcLoading, setCalcLoading] = useState(false);
   const toggleProviderGroup = (groupKey) => {
     const isExpanded = expandedProviders[groupKey] === undefined ? false : expandedProviders[groupKey];
     setExpandedProviders(prev => ({
@@ -219,6 +227,7 @@ export default function App() {
     console.log("Selected providers data:", selectedData);
 
     try {
+      setCalcLoading(true);
       const response = await fetch('http://localhost:8000/calculate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -238,6 +247,8 @@ export default function App() {
     } catch (error) {
       console.error("Error during calculation:", error);
       setResults([]);
+    } finally {
+      setCalcLoading(false);
     }
   };
 
@@ -314,80 +325,82 @@ export default function App() {
   }, {});
 
   return (
-    <div
-      style={{
-        maxWidth: '1080px',
-        margin: '0 auto',
-        padding: '36px 18px',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-        fontSize: '0.9rem'
-      }}
-    >
+    <div style={{ fontFamily: 'inherit' }}>
+      {/* 1. Nav + hero + logos + dev pitch */}
       <Header
         showLeaderboard={showLeaderboard}
         toggleShowLeaderboard={() => setShowLeaderboard(prev => !prev)}
       />
-      
-      {/* Benchmark Table */}
-      {showLeaderboard && (
-        <BenchmarkTable
-          benchmarkTableData={benchmarkTableData}
-          handleSort={handleSort}
-          sortKey={sortKey}
-          sortDirection={sortDirection}
-          renderSortArrow={renderSortArrow}
-        />
-      )}
 
-      {/* Token Inputs */}
-      <TokenInputs
-        tokens={tokens}
-        setTokens={setTokens}
-        calculateCost={calculateCost}
-        selectedProviders={selectedProviders}
-      />
+      {/* 2. Features Section */}
+      <FeaturesGrid />
 
-      {/* Custom Provider Form */}
-      <CustomProviderForm
-        newProvider={newProvider}
-        setNewProvider={setNewProvider}
-        editingIndex={editingIndex}
-        addCustomProvider={addCustomProvider}
-        cancelEdit={cancelEdit}
-      />
+      {/* 3. The cost calculator sections */}
+      <div className="container" style={{ padding: '2rem 0' }}>
+        {/* Benchmark Table */}
+        {showLeaderboard && (
+          <BenchmarkTable
+            benchmarkTableData={benchmarkTableData}
+            handleSort={handleSort}
+            sortKey={sortKey}
+            sortDirection={sortDirection}
+            renderSortArrow={renderSortArrow}
+          />
+        )}
 
-      {/* Providers List */}
-      {(filteredOpenRouter.length > 0 || filteredCustom.length > 0) && (
-        <ProviderList
-          filteredOpenRouter={filteredOpenRouter}
-          filteredCustom={filteredCustom}
-          expandedSource={expandedSource}
-          toggleSourceGroup={toggleSourceGroup}
-          groupedOpenRouter={groupedOpenRouter}
-          groupedCustom={groupedCustom}
-          expandedProviders={expandedProviders}
-          toggleProviderGroup={toggleProviderGroup}
-          toggleProvider={toggleProvider}
+        {/* Token Inputs */}
+        <TokenInputs
+          tokens={tokens}
+          setTokens={setTokens}
+          calculateCost={calculateCost}
           selectedProviders={selectedProviders}
-          editProvider={editProvider}
-          deleteProvider={deleteProvider}
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
-          selectAllProviders={selectAllProviders}
-          deselectAllProviders={deselectAllProviders}
-          deleteSelectedProviders={deleteSelectedProviders}
         />
-      )}
 
-      {/* Results Section */}
-      {results.length > 0 && (
-        <ResultsChart results={results} />
-      )}
+        {/* Custom Provider Form */}
+        <CustomProviderForm
+          newProvider={newProvider}
+          setNewProvider={setNewProvider}
+          editingIndex={editingIndex}
+          addCustomProvider={addCustomProvider}
+          cancelEdit={cancelEdit}
+        />
 
-      {/* Benchmarks Display */}
-      {benchmarks.length > 0 && (
-        <BenchmarksDisplay benchmarks={benchmarks} />
-      )}
+        {/* Providers List */}
+        {(filteredOpenRouter.length > 0 || filteredCustom.length > 0) && (
+          <ProviderList
+            filteredOpenRouter={filteredOpenRouter}
+            filteredCustom={filteredCustom}
+            expandedSource={expandedSource}
+            toggleSourceGroup={toggleSourceGroup}
+            groupedOpenRouter={groupedOpenRouter}
+            groupedCustom={groupedCustom}
+            expandedProviders={expandedProviders}
+            toggleProviderGroup={toggleProviderGroup}
+            toggleProvider={toggleProvider}
+            selectedProviders={selectedProviders}
+            editProvider={editProvider}
+            deleteProvider={deleteProvider}
+            searchQuery={searchQuery}
+            setSearchQuery={setSearchQuery}
+            selectAllProviders={selectAllProviders}
+            deselectAllProviders={deselectAllProviders}
+            deleteSelectedProviders={deleteSelectedProviders}
+          />
+        )}
+
+        {/* Results Section */}
+        {results.length > 0 && (
+          <ResultsChart results={results} />
+        )}
+
+        {/* Benchmarks Display */}
+        {benchmarks.length > 0 && (
+          <BenchmarksDisplay benchmarks={benchmarks} />
+        )}
+      </div>
+
+      {/* 4. Footer */}
+      <Footer />
     </div>
   );
 }
