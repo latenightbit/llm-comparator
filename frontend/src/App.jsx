@@ -330,7 +330,14 @@ export default function App() {
             <FeaturesGrid />
 
             {/* 3. The cost calculator sections */}
-            <div className="container" style={{ padding: '2rem 0' }}>
+            <div 
+                className="container calculator-root" 
+                style={{ 
+                    padding: '2rem 0',
+                    scrollMarginTop: '100px'  // Adds space for fixed header
+                }}
+                id="calculator-root"
+            >
                 {/* Benchmark Table */}
                 <BenchmarkTable
                     benchmarkTableData={benchmarkTableData}

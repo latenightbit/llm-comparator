@@ -66,8 +66,33 @@ const Header = ({ }) => {
                     Our unified dashboard calculates your LLM costs across multiple providers in seconds.
                 </p>
 
-                <button className="btn btn-primary" style={{ fontSize: '1rem' }}>
-                    Try the Calculator
+                <button 
+                    className="btn btn-primary scroll-trigger" 
+                    style={{ 
+                        fontSize: '1rem',
+                        padding: '14px 28px',
+                        borderRadius: '8px',
+                        transition: 'all 0.3s ease',
+                        position: 'relative',
+                        overflow: 'hidden',
+                        transform: 'translateZ(0)'
+                    }}
+                    onClick={() => {
+                        const calculator = document.getElementById('calculator-root');
+                        if (calculator) {
+                            window.scrollTo({
+                                top: calculator.offsetTop - 80,
+                                behavior: 'smooth'
+                            });
+                            calculator.classList.add('scroll-highlight');
+                            setTimeout(() => calculator.classList.remove('scroll-highlight'), 1500);
+                        }
+                    }}
+                >
+                    <span style={{ position: 'relative', zIndex: 2 }}>
+                        Try the Calculator
+                    </span>
+                    <div className="btn-hover-effect"></div>
                 </button>
                 <div className="small-text" style={{ marginTop: '0.5rem' }}>
                     Instant cost estimates for GPT-4, Claude, Cohere, & more.
